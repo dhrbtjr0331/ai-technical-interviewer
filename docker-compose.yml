@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # Message Bus - Redis for agent communication
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Database - PostgreSQL for session persistence
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: interview_db
+      POSTGRES_USER: interview_user
+      POSTGRES_PASSWORD: interview_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./shared/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # Coordinator Agent - Master orchestrator
+  coordinator:
+    build:
+      context: .
+      dockerfile: agents/coordinator/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+      - ./problems:/app/problems
+    restart: unless-stopped
+
+  # Interviewer Agent - Conversational flow
+  interviewer:
+    build:
+      context: .
+      dockerfile: agents/interviewer/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+    depends_on:
+      - redis
+      - postgres
+      - coordinator
+    volumes:
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  # Code Analyzer Agent - Real-time code analysis
+  code_analyzer:
+    build:
+      context: .
+      dockerfile: agents/code_analyzer/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+      - code_workspace:/workspace
+    restart: unless-stopped
+
+  # Execution Agent - Secure code execution
+  execution:
+    build:
+      context: .
+      dockerfile: agents/execution/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+      - code_workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock  # For Docker-in-Docker execution
+    privileged: true  # Required for Docker-in-Docker
+    restart: unless-stopped
+
+  # CLI Interface - For testing
+  cli:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+    depends_on:
+      - coordinator
+      - interviewer
+      - code_analyzer
+      - execution
+    volumes:
+      - ./shared:/app/shared
+      - ./cli:/app/cli
+    stdin_open: true
+    tty: true
+    profiles: ["cli"]  # Only start when explicitly requested
+
+volumes:
+  redis_data:
+  postgres_data:
+  code_workspace:
