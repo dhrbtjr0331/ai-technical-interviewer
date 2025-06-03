@@ -1,3 +1,18 @@
+#!/bin/bash
+# complete-fix.sh - Fix all remaining issues
+
+echo "🔧 Applying complete fixes..."
+
+# 1. Fix docker-compose.yml version warning
+echo "📝 Removing obsolete version from docker-compose.yml..."
+if grep -q "^version:" docker-compose.yml; then
+    sed -i.backup '/^version:/d' docker-compose.yml
+    echo "✅ Removed version directive"
+fi
+
+# 2. Fix the SQL trigger syntax
+echo "🗄️  Fixing SQL trigger syntax..."
+cat > shared/database/init.sql << 'EOF'
 -- shared/database/init.sql - FIXED VERSION
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -122,3 +137,80 @@ CREATE TRIGGER update_interview_sessions_updated_at BEFORE UPDATE ON interview_s
 
 CREATE TRIGGER update_problems_updated_at BEFORE UPDATE ON problems  
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EOF
+
+echo "✅ Fixed SQL syntax"
+
+# 3. Clean restart with fixed files
+echo "🧹 Clean restart..."
+docker-compose down -v
+
+# 4. Start PostgreSQL with fixed SQL
+echo "🗄️  Starting PostgreSQL with fixed initialization..."
+docker-compose up -d postgres
+
+# 5. Wait for PostgreSQL to be ready
+echo "⏳ Waiting for PostgreSQL..."
+for i in {1..30}; do
+    if docker-compose exec postgres pg_isready -U interview_user > /dev/null 2>&1; then
+        echo "✅ PostgreSQL is ready!"
+        break
+    fi
+    echo "  Waiting... ($i/30)"
+    sleep 2
+done
+
+# 6. Verify database was initialized correctly
+echo "🧪 Verifying database initialization..."
+PROBLEM_COUNT=$(docker-compose exec postgres psql -U interview_user -d interview_db -t -c "SELECT COUNT(*) FROM problems;" 2>/dev/null)
+
+if [ $? -eq 0 ] && [ "${PROBLEM_COUNT// /}" -gt 0 ]; then
+    echo "✅ Database initialized successfully! Found ${PROBLEM_COUNT// /} problems."
+else
+    echo "⚠️  Database initialization may have failed. Checking logs..."
+    docker-compose logs postgres | tail -10
+fi
+
+# 7. Start Redis
+echo "🔄 Starting Redis..."
+docker-compose up -d redis
+sleep 2
+
+# 8. Test Redis
+if docker-compose exec redis redis-cli ping > /dev/null 2>&1; then
+    echo "✅ Redis is working!"
+else
+    echo "❌ Redis failed to start"
+    exit 1
+fi
+
+# 9. Test container builds
+echo "🏗️  Testing container builds..."
+if docker-compose build coordinator > /dev/null 2>&1; then
+    echo "✅ Coordinator builds successfully!"
+else
+    echo "❌ Coordinator build failed:"
+    docker-compose build coordinator
+fi
+
+if docker-compose build cli > /dev/null 2>&1; then
+    echo "✅ CLI builds successfully!"
+else
+    echo "❌ CLI build failed"
+fi
+
+echo ""
+echo "🎉 System is ready!"
+echo ""
+echo "📋 Next steps:"
+echo "1. Make sure your .env has CLAUDE_API_KEY set:"
+echo "   echo \$CLAUDE_API_KEY"
+echo ""
+echo "2. Start the coordinator:"
+echo "   docker-compose up -d coordinator"
+echo ""
+echo "3. Test the system:"
+echo "   docker-compose run --rm cli python cli/main.py interactive"
+echo ""
+echo "📊 Current status:"
+docker-compose ps

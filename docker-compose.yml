@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Message Bus - Redis for agent communication
   redis:
