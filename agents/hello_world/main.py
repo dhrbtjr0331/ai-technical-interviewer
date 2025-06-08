@@ -14,7 +14,7 @@ from shared.models import AgentMessage, EventType, InterviewContext
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
-class HelloWorldCoordinator:
+class HelloWorldAgent:
     """A simple test coordinator that manages the HelloWorld agent."""
 
     def __init__(self):

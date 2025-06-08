@@ -111,6 +111,25 @@ services:
     tty: true
     profiles: ["cli"]  # Only start when explicitly requested
 
+  # Hello World test agent - For testing
+  hello_world:
+    build:
+      context: .
+      dockerfile: agents/hello_world/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+    restart: unless-stopped
+    
 volumes:
   redis_data:
   postgres_data:
