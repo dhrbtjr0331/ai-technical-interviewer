@@ -22,7 +22,7 @@ class MessageBus:
         """Initialize Redis connections"""
         try:
             self.redis_client = redis.from_url(self.redis_url, decode_responses=True)
-            await self.redis_client.ping()
+            await self.redis_client.pin  g()
             self.pubsub = self.redis_client.pubsub()
             logger.info("Message bus initialized successfully")
         except Exception as e:

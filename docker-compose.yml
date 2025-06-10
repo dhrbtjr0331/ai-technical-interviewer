@@ -31,6 +31,11 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
       - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true  # Disable telemetry for privacy
+      - LANGCHAIN_TRACING_V2=false     # Disable LangSmith tracing unless needed
     depends_on:
       - redis
       - postgres
@@ -38,8 +43,13 @@ services:
       - ./shared:/app/shared
       - ./problems:/app/problems
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Interviewer Agent - Conversational flow
+  # Interviewer Agent - Adaptive conversational flow
   interviewer:
     build:
       context: .
@@ -48,6 +58,12 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
     depends_on:
       - redis
       - postgres
@@ -55,6 +71,11 @@ services:
     volumes:
       - ./shared:/app/shared
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Code Analyzer Agent - Real-time code analysis
   code_analyzer:

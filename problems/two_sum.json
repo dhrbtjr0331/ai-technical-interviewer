@@ -1,0 +1,46 @@
+{
+  "id": "two_sum",
+  "title": "Two Sum",
+  "description": "Given an array of integers `nums` and an integer `target`, return indices of the two numbers such that they add up to target.\n\nYou may assume that each input would have exactly one solution, and you may not use the same element twice.\n\nYou can return the answer in any order.\n\n**Example 1:**\n```\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]\nExplanation: Because nums[0] + nums[1] == 9, we return [0, 1].\n```\n\n**Example 2:**\n```\nInput: nums = [3,2,4], target = 6\nOutput: [1,2]\n```\n\n**Example 3:**\n```\nInput: nums = [3,3], target = 6\nOutput: [0,1]\n```\n\n**Constraints:**\n- 2 <= nums.length <= 10^4\n- -10^9 <= nums[i] <= 10^9\n- -10^9 <= target <= 10^9\n- Only one valid answer exists.",
+  "difficulty": "easy",
+  "test_cases": [
+    {
+      "input_data": {"nums": [2, 7, 11, 15], "target": 9},
+      "expected_output": [0, 1],
+      "description": "Basic case with target at beginning",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"nums": [3, 2, 4], "target": 6},
+      "expected_output": [1, 2],
+      "description": "Target not at beginning",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"nums": [3, 3], "target": 6},
+      "expected_output": [0, 1],
+      "description": "Duplicate numbers",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"nums": [-1, -2, -3, -4, -5], "target": -8},
+      "expected_output": [2, 4],
+      "description": "Negative numbers",
+      "is_hidden": true
+    },
+    {
+      "input_data": {"nums": [1, 2, 3, 4, 5, 6, 7, 8, 9], "target": 17},
+      "expected_output": [7, 8],
+      "description": "Large array",
+      "is_hidden": true
+    }
+  ],
+  "starter_code": "def two_sum(nums, target):\n    \"\"\"\n    :type nums: List[int]\n    :type target: int\n    :rtype: List[int]\n    \"\"\"\n    # Your solution here\n    pass",
+  "hints": [
+    "Try using a hash map to store numbers you've seen and their indices",
+    "For each number, check if target - number exists in your hash map",
+    "Remember to return the indices, not the values themselves"
+  ],
+  "topics": ["Array", "Hash Table"],
+  "time_limit_seconds": 900
+}

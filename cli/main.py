@@ -2,6 +2,7 @@ import asyncio
 import click
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Optional
 from rich.console import Console
@@ -10,6 +11,9 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.live import Live
 from rich.text import Text
+
+# Add parent directory to path for shared imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.message_bus import MessageBus, Channels, get_message_bus
 from shared.models import (
