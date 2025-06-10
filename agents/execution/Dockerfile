@@ -1,10 +1,10 @@
+# agents/execution/Dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install Docker CLI for Docker-in-Docker execution
+# Install Docker CLI for container execution
 RUN apt-get update && apt-get install -y \
-    gcc \
     curl \
     apt-transport-https \
     ca-certificates \
@@ -16,12 +16,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy shared modules and agent code
 COPY shared/ ./shared/
 COPY agents/execution/ ./agents/execution/
 
+# Set Python path
 ENV PYTHONPATH=/app
 
+# Run the execution agent
 CMD ["python", "agents/execution/main.py"]

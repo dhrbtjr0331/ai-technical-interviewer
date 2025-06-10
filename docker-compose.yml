@@ -86,13 +86,24 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=0.3  # Lower temperature for more consistent technical analysis
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
     depends_on:
       - redis
       - postgres
+      - coordinator
     volumes:
       - ./shared:/app/shared
-      - code_workspace:/workspace
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ast; ast.parse('def test(): pass')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Execution Agent - Secure code execution
   execution:
@@ -100,17 +111,29 @@ services:
       context: .
       dockerfile: agents/execution/Dockerfile
     environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=0.2  # Low temperature for consistent technical analysis
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
     depends_on:
       - redis
       - postgres
+      - coordinator
     volumes:
       - ./shared:/app/shared
-      - code_workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock  # For Docker-in-Docker execution
     privileged: true  # Required for Docker-in-Docker
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "docker", "version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # CLI Interface - For testing
   cli:
