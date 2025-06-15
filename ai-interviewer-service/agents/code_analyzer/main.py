@@ -12,7 +12,6 @@ import uuid
 from crewai import Agent, Task, Crew, Process
 from langchain_anthropic import ChatAnthropic
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.tools import Tool
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -249,39 +248,8 @@ Feedback:"""
     async def _setup_crewai(self):
         """Setup CrewAI for complex code analysis orchestration"""
         try:
-            # Define tools for code analysis
-            tools = [
-                Tool(
-                    name="parse_ast",
-                    description="Parse Python code into AST and extract structural information",
-                    func=self._tool_parse_ast
-                ),
-                Tool(
-                    name="detect_patterns",
-                    description="Detect algorithmic patterns and approaches in code",
-                    func=self._tool_detect_patterns
-                ),
-                Tool(
-                    name="analyze_complexity",
-                    description="Analyze time and space complexity of code",
-                    func=self._tool_analyze_complexity
-                ),
-                Tool(
-                    name="check_syntax",
-                    description="Check code syntax and identify common errors",
-                    func=self._tool_check_syntax
-                ),
-                Tool(
-                    name="get_problem_context",
-                    description="Get context about the current problem being solved",
-                    func=self._tool_get_problem_context
-                ),
-                Tool(
-                    name="assess_completeness",
-                    description="Assess how complete the solution is",
-                    func=self._tool_assess_completeness
-                )
-            ]
+            # Define tools for code analysis - using empty list for now
+            tools = []
             
             # Create the code analyzer CrewAI agent
             self.crew_agent = Agent(

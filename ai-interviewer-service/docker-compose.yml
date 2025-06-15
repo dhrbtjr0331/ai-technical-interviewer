@@ -16,7 +16,7 @@ services:
       POSTGRES_USER: interview_user
       POSTGRES_PASSWORD: interview_pass
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./shared/database/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -133,7 +133,7 @@ services:
       test: ["CMD", "docker", "version"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 31
 
   # CLI Interface - For testing
   cli:

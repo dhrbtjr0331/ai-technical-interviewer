@@ -11,7 +11,6 @@ from crewai import Agent, Task, Crew, Process
 from langchain_anthropic import ChatAnthropic
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
-from langchain.tools import Tool
 
 # Database for problem management
 import asyncpg
@@ -122,29 +121,8 @@ class CoordinatorAgent:
     async def _setup_crewai(self):
         """Setup CrewAI agent and crew"""
         
-        # Define tools for the coordinator agent
-        tools = [
-            Tool(
-                name="select_problem",
-                description="Select an appropriate coding problem based on difficulty and user progress",
-                func=self._tool_select_problem
-            ),
-            Tool(
-                name="route_message",
-                description="Route user input to the appropriate specialized agent",
-                func=self._tool_route_message
-            ),
-            Tool(
-                name="update_interview_state",
-                description="Update the current interview state and context",
-                func=self._tool_update_interview_state
-            ),
-            Tool(
-                name="analyze_user_progress",
-                description="Analyze user's current progress and performance",
-                func=self._tool_analyze_user_progress
-            )
-        ]
+        # Define tools for the coordinator agent - using empty list for now but tools are available as methods
+        tools = []
         
         # Create the coordinator CrewAI agent
         self.crew_agent = Agent(
@@ -164,8 +142,8 @@ class CoordinatorAgent:
             verbose=True,
             allow_delegation=True,  # Can delegate to other agents
             llm=self.llm,
-            tools=tools,
-            memory=True
+            memory=True,
+            tools=tools  # Explicitly pass empty tools list
         )
         
         # Create the crew with just the coordinator for now
@@ -178,8 +156,8 @@ class CoordinatorAgent:
         
         logger.info("✅ CrewAI agent and crew initialized")
     
-    # Tool implementations for CrewAI agent
-    def _tool_select_problem(self, difficulty: str = "medium") -> str:
+    # Helper methods for coordination logic
+    def select_problem_tool(self, difficulty: str = "medium") -> str:
         """Tool: Select appropriate problem"""
         try:
             # This would normally be async, but CrewAI tools need to be sync
@@ -210,7 +188,7 @@ class CoordinatorAgent:
         except Exception as e:
             return f"Database error: {e}"
     
-    def _tool_route_message(self, user_input: str, context: str = "") -> str:
+    def route_message_tool(self, user_input: str, context: str = "") -> str:
         """Tool: Determine which agent should handle user input"""
         try:
             # Simple routing logic for now - we'll make this more sophisticated
@@ -229,7 +207,7 @@ class CoordinatorAgent:
         except Exception as e:
             return f"Error routing message: {e}"
     
-    def _tool_update_interview_state(self, session_id: str, new_state: str, context_updates: str = "") -> str:
+    def update_interview_state_tool(self, session_id: str, new_state: str, context_updates: str = "") -> str:
         """Tool: Update interview state"""
         try:
             # Update the session context
@@ -245,7 +223,7 @@ class CoordinatorAgent:
         except Exception as e:
             return f"Error updating state: {e}"
     
-    def _tool_analyze_user_progress(self, session_id: str) -> str:
+    def analyze_user_progress_tool(self, session_id: str) -> str:
         """Tool: Analyze user's current progress"""
         try:
             if session_id in self.active_sessions:
@@ -273,17 +251,27 @@ class CoordinatorAgent:
             payload = message.payload
             action = payload.get("action", "")
             
+            logger.info(f"🎯 Received coordination action: {action}")
+            
             if action == "start_interview":
                 await self._start_interview(payload)
             elif action == "end_interview":
                 await self._end_interview(payload)
             elif action == "pause_interview":
                 await self._pause_interview(payload)
+            elif action == "submit_code":
+                logger.info(f"📝 Processing submit_code action for session: {payload.get('session_id', 'unknown')}")
+                await self._handle_code_submission(payload)
+            elif action == "execute_code":
+                logger.info(f"▶️ Processing execute_code action for session: {payload.get('session_id', 'unknown')}")
+                await self._handle_execution_request(payload)
             else:
                 logger.warning(f"Unknown coordination action: {action}")
                 
         except Exception as e:
             logger.error(f"❌ Error handling coordination message: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
     
     async def handle_user_interaction(self, message: AgentMessage):
         """Handle user input and route appropriately"""
@@ -390,8 +378,8 @@ class CoordinatorAgent:
                 expected_output="Interview start response with problem introduction"
             )
             
-            # Execute the task
-            crew_result = self.crew.kickoff(tasks=[task])
+            # Skip CrewAI for now and handle directly
+            crew_result = "Interview started successfully"
             
             # Select and load the problem
             problem = await self._select_problem(difficulty)
@@ -440,8 +428,8 @@ class CoordinatorAgent:
                 expected_output="JSON routing decision"
             )
             
-            # Execute the routing decision
-            result = self.crew.kickoff(tasks=[task])
+            # Smart routing based on user input content
+            result = await self._smart_route_user_input(user_input, context)
             
             # Parse and execute the routing decision
             await self._execute_routing_decision(session_id, user_input, result, context)
@@ -513,6 +501,48 @@ class CoordinatorAgent:
             context_snapshot=self.active_sessions.get(session_id, {}).to_dict() if session_id in self.active_sessions else {}
         )
         await self.message_bus.publish(Channels.USER_INTERACTION, message)
+    
+    async def _route_to_execution_agent(self, session_id: str, action: str, payload: Dict[str, Any]):
+        """Route message to execution agent"""
+        message = AgentMessage(
+            event_type=EventType.EXECUTION_REQUEST,
+            source_agent=self.agent_name,
+            target_agent="execution",
+            payload={
+                "action": action,
+                "session_id": session_id,
+                **payload
+            },
+            context_snapshot=self.active_sessions.get(session_id, {}).to_dict() if session_id in self.active_sessions else {}
+        )
+        await self.message_bus.publish(Channels.EXECUTION, message)
+    
+    async def _smart_route_user_input(self, user_input: str, context: InterviewContext) -> str:
+        """Smart routing based on user input content and context"""
+        try:
+            user_input_lower = user_input.lower()
+            
+            # Route based on input patterns
+            hint_keywords = ["hint", "help", "stuck", "clue", "guidance", "approach"]
+            if any(keyword in user_input_lower for keyword in hint_keywords):
+                return "route_to:hint_provider"
+            
+            # Questions about the problem or clarifications
+            question_keywords = ["what", "how", "why", "can i", "should i", "example", "clarify"]
+            if any(keyword in user_input_lower for keyword in question_keywords):
+                return "route_to:interviewer"
+            
+            # General conversation
+            conversation_keywords = ["hi", "hello", "thanks", "ok", "yes", "no", "ready", "start"]
+            if any(keyword in user_input_lower for keyword in conversation_keywords):
+                return "route_to:interviewer"
+            
+            # Default to interviewer for any other input
+            return "route_to:interviewer"
+            
+        except Exception as e:
+            logger.error(f"Error in smart routing: {e}")
+            return "route_to:interviewer"
     
     # Helper methods
     async def _select_problem(self, difficulty: str) -> Optional[Problem]:
@@ -589,6 +619,40 @@ class CoordinatorAgent:
         """Pause interview session"""
         # Implementation for pausing interviews
         pass
+    
+    async def _handle_code_submission(self, payload: Dict[str, Any]):
+        """Handle code submission and route to code analyzer"""
+        try:
+            session_id = payload.get("session_id", "")
+            code = payload.get("code", "")
+            language = payload.get("language", "python")
+            
+            logger.info(f"🔍 Routing code submission to analyzer for session {session_id}")
+            
+            # Route to code analyzer agent
+            await self._route_to_code_analyzer(session_id, "analyze_code", {
+                "code": code,
+                "language": language,
+                "session_id": session_id
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling code submission: {e}")
+    
+    async def _handle_execution_request(self, payload: Dict[str, Any]):
+        """Handle code execution request and route to execution agent"""
+        try:
+            session_id = payload.get("session_id", "")
+            
+            logger.info(f"⚡ Routing execution request to execution agent for session {session_id}")
+            
+            # Route to execution agent
+            await self._route_to_execution_agent(session_id, "execute_code", {
+                "session_id": session_id
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling execution request: {e}")
     
     # Main run loop
     async def run(self):

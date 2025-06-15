@@ -11,7 +11,6 @@ from crewai import Agent, Task, Crew, Process
 from langchain_anthropic import ChatAnthropic
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
-from langchain.tools import Tool
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -89,7 +88,7 @@ class InterviewerAgent:
         
         # Memory for conversation context
         self.memory = ConversationBufferWindowMemory(
-            k=15,  # Keep last 15 exchanges
+            k=25,  # Keep last 25 exchanges for better context
             return_messages=True,
             memory_key="chat_history"
         )
@@ -142,27 +141,25 @@ class InterviewerAgent:
     async def _setup_langchain_chains(self):
         """Setup LangChain chains for quick responses"""
         try:
-            # Conversation chain for general chat
+            # Conversation chain for LeetCode-style DSA interviews
             conversation_prompt = PromptTemplate(
-                input_variables=["user_input", "interview_context", "personality_mode", "chat_history"],
-                template="""You are an experienced technical interviewer at a top tech company. 
+                input_variables=["input"],
+                template="""You are an experienced technical interviewer conducting a LeetCode-style algorithmic coding interview at a top tech company (like Google, Meta, Amazon).
 
-PERSONALITY MODE: {personality_mode}
-- encouraging: Be warm, supportive, help build confidence
-- challenging: Be more direct, push for deeper thinking
-- neutral: Balanced professional approach
-- clarifying: Focus on explaining and helping understanding
+This is a DATA STRUCTURES & ALGORITHMS interview focused on problem-solving skills, not a general software engineering discussion.
 
-INTERVIEW CONTEXT:
-{interview_context}
+Your role:
+- Focus ONLY on algorithmic problem-solving and coding
+- Guide candidates through LeetCode-style problems (arrays, strings, trees, graphs, dynamic programming, etc.)
+- Ask about time/space complexity analysis
+- Help with algorithm optimization and edge cases
+- Provide additional test cases and examples when requested
+- Remember the current problem context and maintain conversation continuity
+- Avoid general software engineering topics, system design, or behavioral questions
 
-CONVERSATION HISTORY:
-{chat_history}
+Keep responses focused on the coding problem at hand (2-4 sentences typically).
 
-USER INPUT: "{user_input}"
-
-Respond naturally as an interviewer would. Keep responses conversational and appropriately sized (2-4 sentences typically). 
-Match the personality mode while maintaining professionalism. Don't be overly verbose.
+{input}
 
 Response:"""
             )
@@ -173,24 +170,20 @@ Response:"""
                 memory=self.memory
             )
             
-            # Problem introduction chain
+            # Problem introduction chain for LeetCode-style problems
             problem_intro_prompt = PromptTemplate(
-                input_variables=["problem_title", "problem_description", "difficulty", "user_context"],
-                template="""You are introducing a coding problem to a candidate in a technical interview.
+                input_variables=["input"],
+                template="""You are introducing a LeetCode-style algorithmic coding problem to a candidate.
 
-PROBLEM: {problem_title} ({difficulty} difficulty)
-DESCRIPTION: {problem_description}
+This is a focused DSA (Data Structures & Algorithms) interview. Introduce the problem professionally and concisely:
+- Present the problem statement clearly
+- Mention it's similar to LeetCode problems they may have practiced
+- Encourage them to think about optimal time/space complexity
+- Let them know they can ask clarifying questions about the algorithm/data structures
 
-USER CONTEXT: {user_context}
+Keep the introduction brief and algorithm-focused.
 
-Create a warm, professional introduction that:
-1. Welcomes them to the interview segment
-2. Introduces the problem clearly 
-3. Explains what they need to do
-4. Encourages them to ask questions if anything is unclear
-5. Sets a collaborative, supportive tone
-
-Keep it conversational and encouraging. This should feel like a real interview, not a robot.
+{input}
 
 Introduction:"""
             )
@@ -236,47 +229,31 @@ Encouragement:"""
     async def _setup_crewai(self):
         """Setup CrewAI for complex interview orchestration"""
         try:
-            # Define tools for the interviewer
-            tools = [
-                Tool(
-                    name="analyze_user_emotional_state",
-                    description="Analyze user's emotional state and confidence level from their recent interactions",
-                    func=self._tool_analyze_emotional_state
-                ),
-                Tool(
-                    name="get_problem_guidance",
-                    description="Get appropriate guidance or hints for the current problem without giving away the solution",
-                    func=self._tool_get_problem_guidance
-                ),
-                Tool(
-                    name="assess_progress",
-                    description="Assess user's progress and determine what kind of response would be most helpful",
-                    func=self._tool_assess_progress
-                ),
-                Tool(
-                    name="determine_personality_mode",
-                    description="Determine what personality mode to use based on user state and context",
-                    func=self._tool_determine_personality_mode
-                )
-            ]
+            # Define tools for the interviewer - using empty list for now but tools are available as methods
+            tools = []
             
             # Create the interviewer CrewAI agent
             self.crew_agent = Agent(
-                role="Technical Interview Specialist",
-                goal="Conduct natural, effective technical interviews that assess skills while maintaining positive candidate experience",
+                role="LeetCode-Style Algorithm Interview Specialist",
+                goal="Conduct focused DSA coding interviews that assess algorithmic problem-solving skills using LeetCode-style problems",
                 backstory="""You are a senior software engineer with 8+ years of experience conducting 
-                technical interviews at companies like Google, Meta, and Amazon. You have interviewed 
-                over 500 candidates and are known for your ability to:
+                LeetCode-style algorithmic coding interviews at top tech companies (Google, Meta, Amazon, Microsoft).
                 
-                - Make candidates feel comfortable while still assessing thoroughly
-                - Adapt your communication style to different personality types
-                - Guide candidates when they're stuck without giving away answers
-                - Ask clarifying questions that reveal thought processes
-                - Provide encouragement that builds confidence
-                - Recognize when to push harder vs. when to support
+                You specialize in DATA STRUCTURES & ALGORITHMS interviews and have interviewed over 500 candidates on:
+                - Array/String manipulation problems
+                - Binary Trees and Graph traversals
+                - Dynamic Programming and Recursion
+                - Hash Tables and Two Pointers techniques
+                - Time/Space complexity optimization
                 
-                You understand that interviews are stressful and your job is to help candidates 
-                show their best work while getting an accurate assessment of their abilities.""",
+                Your expertise:
+                - Guide candidates through optimal algorithm approaches
+                - Help with complexity analysis (Big O notation)
+                - Identify edge cases and test scenarios
+                - Provide hints without giving away solutions
+                - Focus purely on algorithmic thinking, not system design or behavioral aspects
+                
+                You keep interviews focused on coding and algorithms, similar to actual LeetCode practice sessions.""",
                 verbose=True,
                 allow_delegation=False,
                 llm=self.llm,
@@ -284,9 +261,10 @@ Encouragement:"""
                 memory=True
             )
             
-            # Create the crew
+            # Create the crew - we'll add tasks dynamically
             self.crew = Crew(
                 agents=[self.crew_agent],
+                tasks=[],  # Empty for now, we'll create tasks on demand
                 verbose=True,
                 process=Process.sequential
             )
@@ -301,7 +279,7 @@ Encouragement:"""
     # CREWAI TOOLS
     # ==========================================
     
-    def _tool_analyze_emotional_state(self, recent_interactions: str) -> str:
+    def analyze_emotional_state_tool(self, recent_interactions: str) -> str:
         """Analyze user's emotional state from recent interactions"""
         try:
             if not recent_interactions:
@@ -349,7 +327,7 @@ Encouragement:"""
             logger.error(f"Error analyzing emotional state: {e}")
             return json.dumps({"emotional_state": "neutral", "confidence_level": "unknown", "error": str(e)})
     
-    def _tool_get_problem_guidance(self, problem_id: str, user_approach: str = "") -> str:
+    def get_problem_guidance_tool(self, problem_id: str, user_approach: str = "") -> str:
         """Get appropriate guidance for the current problem"""
         try:
             with self._db_lock:
@@ -398,7 +376,7 @@ Encouragement:"""
                 "error": f"Database error: {str(e)}"
             })
     
-    def _tool_assess_progress(self, session_context: str) -> str:
+    def assess_progress_tool(self, session_context: str) -> str:
         """Assess user's progress and determine helpful response type"""
         try:
             if not session_context:
@@ -453,7 +431,7 @@ Encouragement:"""
                 "error": str(e)
             })
     
-    def _tool_determine_personality_mode(self, emotional_state: str, progress_assessment: str, time_context: str) -> str:
+    def determine_personality_mode_tool(self, emotional_state: str, progress_assessment: str, time_context: str) -> str:
         """Determine what personality mode to use"""
         try:
             # Default mode
@@ -567,18 +545,23 @@ Encouragement:"""
                 user_context = f"Starting {difficulty} difficulty interview for {user_id}"
                 
                 response = await self.problem_introduction_chain.arun(
-                    problem_title=problem_title,
-                    problem_description=problem_description,
-                    difficulty=difficulty,
-                    user_context=user_context
+                    input=f"PROBLEM: {problem_title} ({difficulty} difficulty)\nDESCRIPTION: {problem_description}\nUSER: {user_id}"
                 )
             
-            # Store session context
+            # Store session context - ensure we capture manually presented problems too
+            current_problem = problem_data if problem_data else {
+                "title": "Two Sum",
+                "description": "Given an array of integers and a target sum, return two numbers that add up to the target.",
+                "examples": ["[2, 7, 11, 15] target=9 -> [2, 7]"],
+                "type": "algorithm"
+            }
+            
             self.active_sessions[session_id] = {
-                "current_problem": problem_data,
+                "current_problem": current_problem,
                 "difficulty": difficulty,
                 "start_time": datetime.now(),
-                "conversation_history": []
+                "conversation_history": [],
+                "last_response": response  # Store what we just said
             }
             
             # Send response to user
@@ -591,7 +574,7 @@ Encouragement:"""
             # Fallback response
             await self._send_response_to_user(
                 session_id, 
-                "Welcome to your technical interview! I'm here to guide you through a coding problem. Let's begin - feel free to ask any questions as we go.",
+                "Welcome to your LeetCode-style DSA interview! I'm here to guide you through an algorithmic coding problem. Let's focus on optimal solutions and complexity analysis. Ready to start coding?",
                 "interview_start_fallback"
             )
     
@@ -601,13 +584,16 @@ Encouragement:"""
             difficulty = payload.get("difficulty", "medium")
             error = payload.get("error", "")
             
-            response = f"""Welcome to your technical interview! I'm your interviewer today.
-            
-We'll be working on a {difficulty} level coding problem. I'm here to help guide you through it and answer any questions you might have.
+            response = f"""Welcome to your LeetCode-style algorithmic coding interview! I'm your interviewer today.
 
-Let me get the problem details ready for you. In the meantime, feel free to let me know if you have any questions about the interview process or if there's anything I can clarify.
+We'll be working on a {difficulty}-level data structures and algorithms problem, similar to what you'd find on LeetCode. 
 
-Ready to get started?"""
+Focus on:
+- Optimal algorithm design and implementation
+- Time and space complexity analysis
+- Edge case handling
+
+I'll present the problem shortly. Feel free to ask clarifying questions about the algorithm or approach as we go. Ready to dive into some coding?"""
             
             if error:
                 logger.warning(f"Interview start fallback due to error: {error}")
@@ -627,25 +613,10 @@ Ready to get started?"""
                 session_data = self.active_sessions[session_id]
                 problem_data = session_data.get("current_problem", {})
                 
-                task = Task(
-                    description=f"""
-                    The candidate is asking for clarification about the problem: "{user_content}"
-                    
-                    Current problem: {problem_data.get('title', 'Unknown')}
-                    Problem description: {problem_data.get('description', 'No description available')}
-                    
-                    Use your tools to:
-                    1. Assess what specific aspect they're confused about
-                    2. Determine the best way to clarify without giving away the solution
-                    3. Provide a helpful clarification that guides them forward
-                    
-                    Respond as a helpful interviewer who wants them to succeed.
-                    """,
-                    agent=self.crew_agent,
-                    expected_output="Clear, helpful clarification response"
+                # Use conversation chain for clarification
+                response = await self.conversation_chain.arun(
+                    input=f"The candidate is asking for clarification: '{user_content}'. Please help clarify the problem without giving away the solution."
                 )
-                
-                response = str(self.crew.kickoff(tasks=[task]))
             else:
                 # Fallback to simple clarification
                 response = "I'd be happy to clarify! Could you be more specific about which part of the problem you'd like me to explain? I want to make sure you have a clear understanding before you begin coding."
@@ -682,33 +653,51 @@ Ready to get started?"""
                 "session_duration": (datetime.now() - session_data.get("start_time", datetime.now())).total_seconds()
             })
             
-            task = Task(
-                description=f"""
-                Respond to this candidate input during the interview: "{user_content}"
+            # For newer CrewAI, we need to use the agent directly or recreate crew with task
+            # Let's use a simpler approach with direct LLM call for now
+            try:
+                # Prepare context-aware input for the conversation chain
+                current_problem = session_data.get("current_problem", {})
+                last_response = session_data.get("last_response", "")
+                problem_context = ""
                 
-                Recent conversation context: {recent_interactions}
-                Session context: {context_json}
+                if current_problem:
+                    problem_title = current_problem.get("title", "")
+                    problem_desc = current_problem.get("description", "")
+                    examples = current_problem.get("examples", [])
+                    problem_context = f"\n\nCURRENT PROBLEM: {problem_title}\n{problem_desc}"
+                    if examples:
+                        problem_context += f"\nExamples: {', '.join(examples)}"
+                    problem_context += "\n\n"
                 
-                Use your tools to:
-                1. Analyze their emotional state from recent interactions
-                2. Assess their progress and needs
-                3. Determine the best personality mode for your response
+                # Include recent context
+                recent_context = ""
+                if last_response:
+                    recent_context = f"MY LAST RESPONSE: {last_response}\n\n"
                 
-                Then provide a natural, helpful response that matches the determined personality mode.
-                Be conversational and supportive while maintaining interview professionalism.
-                """,
-                agent=self.crew_agent,
-                expected_output="Natural, contextually appropriate interviewer response"
-            )
-            
-            response = str(self.crew.kickoff(tasks=[task]))
+                # Use conversation chain with full context
+                context_input = f"{problem_context}{recent_context}CANDIDATE MESSAGE: {user_content}"
+                response = await self.conversation_chain.arun(
+                    input=context_input
+                )
+            except Exception as crew_error:
+                logger.warning(f"CrewAI fallback failed: {crew_error}, using simple response")
+                response = f"Thank you for your input: '{user_content}'. Could you tell me more about what you're thinking or if you have any specific questions?"
             
             # Add interviewer response to history
             conversation_history.append({"speaker": "interviewer", "content": response, "timestamp": datetime.now()})
             
+            # Detect if we just presented a problem and store it
+            if self._detect_problem_presentation(response):
+                problem_info = self._extract_problem_from_response(response)
+                if session_id in self.active_sessions:
+                    self.active_sessions[session_id]["current_problem"] = problem_info
+                    logger.info(f"🎯 Stored problem: {problem_info.get('title', 'Unknown')} for session {session_id}")
+            
             # Update session data
             if session_id in self.active_sessions:
                 self.active_sessions[session_id]["conversation_history"] = conversation_history
+                self.active_sessions[session_id]["last_response"] = response  # Store our response for context
             
             await self._send_response_to_user(session_id, response, "conversation")
             
@@ -775,6 +764,75 @@ Ready to get started?"""
         except Exception as e:
             logger.error(f"❌ Error sending response to user: {e}")
     
+    def _detect_problem_presentation(self, response: str) -> bool:
+        """Detect if the response contains a problem statement"""
+        problem_indicators = [
+            "write a function",
+            "implement a",
+            "given an array",
+            "given a string",
+            "coding problem",
+            "palindrome",
+            "sort",
+            "find the",
+            "return the",
+            "algorithm",
+            "how would you approach",
+            "think out loud"
+        ]
+        response_lower = response.lower()
+        return any(indicator in response_lower for indicator in problem_indicators)
+    
+    def _extract_problem_from_response(self, response: str) -> dict:
+        """Extract problem information from the response"""
+        try:
+            # Try to identify the problem type based on keywords
+            response_lower = response.lower()
+            
+            if "palindrome" in response_lower:
+                return {
+                    "title": "Valid Palindrome",
+                    "description": "Determine if a given string is a valid palindrome, considering only alphanumeric characters and ignoring case.",
+                    "difficulty": "easy",
+                    "topics": ["string", "two-pointers"],
+                    "type": "algorithm"
+                }
+            elif "two sum" in response_lower or "add up to" in response_lower:
+                return {
+                    "title": "Two Sum",
+                    "description": "Find two numbers in an array that add up to a specific target sum.",
+                    "difficulty": "easy", 
+                    "topics": ["array", "hash-table"],
+                    "type": "algorithm"
+                }
+            elif "subarray" in response_lower and "sum" in response_lower:
+                return {
+                    "title": "Maximum Subarray",
+                    "description": "Find the contiguous subarray with the largest sum.",
+                    "difficulty": "medium",
+                    "topics": ["array", "dynamic-programming"],
+                    "type": "algorithm"
+                }
+            else:
+                # Generic problem
+                return {
+                    "title": "Coding Problem",
+                    "description": response[:200] + "..." if len(response) > 200 else response,
+                    "difficulty": "medium",
+                    "topics": ["algorithm"],
+                    "type": "algorithm"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error extracting problem: {e}")
+            return {
+                "title": "Coding Problem",
+                "description": "Algorithm problem",
+                "difficulty": "medium",
+                "topics": ["algorithm"],
+                "type": "algorithm"
+            }
+    
     # ==========================================
     # MAIN RUN LOOP
     # ==========================================
@@ -795,4 +853,47 @@ Ready to get started?"""
             })
             
             # Start heartbeat task
-            heartbeat
+            heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            
+            # Start listening for messages
+            await self.message_bus.start_listening()
+            
+        except Exception as e:
+            logger.error(f"❌ Fatal error in interviewer: {e}")
+        finally:
+            await self.shutdown()
+    
+    async def _heartbeat_loop(self):
+        """Send periodic heartbeats"""
+        while self.running:
+            try:
+                await self.message_bus.heartbeat(self.agent_name)
+                await asyncio.sleep(30)
+            except Exception as e:
+                logger.error(f"❌ Heartbeat error: {e}")
+                break
+    
+    async def shutdown(self):
+        """Clean shutdown"""
+        logger.info("🛑 Interviewer shutting down...")
+        self.running = False
+        
+        if self.message_bus:
+            await self.message_bus.shutdown()
+        if self.sync_db_pool:
+            self.sync_db_pool.closeall()
+
+# Entry point
+async def main():
+    interviewer = InterviewerAgent()
+    try:
+        await interviewer.run()
+    except KeyboardInterrupt:
+        logger.info("🛑 Received interrupt signal")
+    except Exception as e:
+        logger.error(f"❌ Unexpected error: {e}")
+    finally:
+        await interviewer.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
