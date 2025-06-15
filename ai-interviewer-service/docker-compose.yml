@@ -1,0 +1,180 @@
+services:
+  # Message Bus - Redis for agent communication
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Database - PostgreSQL for session persistence
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: interview_db
+      POSTGRES_USER: interview_user
+      POSTGRES_PASSWORD: interview_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./shared/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # Coordinator Agent - Master orchestrator
+  coordinator:
+    build:
+      context: .
+      dockerfile: agents/coordinator/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true  # Disable telemetry for privacy
+      - LANGCHAIN_TRACING_V2=false     # Disable LangSmith tracing unless needed
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+      - ./problems:/app/problems
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Interviewer Agent - Adaptive conversational flow
+  interviewer:
+    build:
+      context: .
+      dockerfile: agents/interviewer/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
+    depends_on:
+      - redis
+      - postgres
+      - coordinator
+    volumes:
+      - ./shared:/app/shared
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Code Analyzer Agent - Real-time code analysis
+  code_analyzer:
+    build:
+      context: .
+      dockerfile: agents/code_analyzer/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=0.3  # Lower temperature for more consistent technical analysis
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
+    depends_on:
+      - redis
+      - postgres
+      - coordinator
+    volumes:
+      - ./shared:/app/shared
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ast; ast.parse('def test(): pass')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Execution Agent - Secure code execution
+  execution:
+    build:
+      context: .
+      dockerfile: agents/execution/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=0.2  # Low temperature for consistent technical analysis
+      # CrewAI specific settings
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      - LANGCHAIN_TRACING_V2=false
+    depends_on:
+      - redis
+      - postgres
+      - coordinator
+    volumes:
+      - ./shared:/app/shared
+      - /var/run/docker.sock:/var/run/docker.sock  # For Docker-in-Docker execution
+    privileged: true  # Required for Docker-in-Docker
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "docker", "version"]
+      interval: 30s
+      timeout: 10s
+      retries: 31
+
+  # CLI Interface - For testing
+  cli:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+    depends_on:
+      - coordinator
+      - interviewer
+      - code_analyzer
+      - execution
+    volumes:
+      - ./shared:/app/shared
+      - ./cli:/app/cli
+    stdin_open: true
+    tty: true
+    profiles: ["cli"]  # Only start when explicitly requested
+
+  # Hello World test agent - For testing
+  hello_world:
+    build:
+      context: .
+      dockerfile: agents/hello_world/Dockerfile
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://interview_user:interview_pass@postgres:5432/interview_db
+      - LOG_LEVEL=INFO
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./shared:/app/shared
+    restart: unless-stopped
+    
+volumes:
+  redis_data:
+  postgres_data:
+  code_workspace:

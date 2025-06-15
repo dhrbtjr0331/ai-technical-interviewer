@@ -1,0 +1,58 @@
+{
+  "id": "longest_substring",
+  "title": "Longest Substring Without Repeating Characters",
+  "description": "Given a string `s`, find the length of the longest substring without repeating characters.\n\n**Example 1:**\n```\nInput: s = \"abcabcbb\"\nOutput: 3\nExplanation: The answer is \"abc\", with the length of 3.\n```\n\n**Example 2:**\n```\nInput: s = \"bbbbb\"\nOutput: 1\nExplanation: The answer is \"b\", with the length of 1.\n```\n\n**Example 3:**\n```\nInput: s = \"pwwkew\"\nOutput: 3\nExplanation: The answer is \"wke\", with the length of 3.\nNotice that the answer must be a substring, \"pwke\" is a subsequence and not a substring.\n```\n\n**Constraints:**\n- 0 <= s.length <= 5 * 10^4\n- s consists of English letters, digits, symbols and spaces.",
+  "difficulty": "medium",
+  "test_cases": [
+    {
+      "input_data": {"s": "abcabcbb"},
+      "expected_output": 3,
+      "description": "Basic example",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"s": "bbbbb"},
+      "expected_output": 1,
+      "description": "All same characters",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"s": "pwwkew"},
+      "expected_output": 3,
+      "description": "Complex case",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"s": ""},
+      "expected_output": 0,
+      "description": "Empty string",
+      "is_hidden": false
+    },
+    {
+      "input_data": {"s": "au"},
+      "expected_output": 2,
+      "description": "Two different characters",
+      "is_hidden": true
+    },
+    {
+      "input_data": {"s": "dvdf"},
+      "expected_output": 3,
+      "description": "Sliding window test",
+      "is_hidden": true
+    },
+    {
+      "input_data": {"s": "abcdef"},
+      "expected_output": 6,
+      "description": "No repeating characters",
+      "is_hidden": true
+    }
+  ],
+  "starter_code": "def length_of_longest_substring(s):\n    \"\"\"\n    :type s: str\n    :rtype: int\n    \"\"\"\n    # Your solution here\n    pass",
+  "hints": [
+    "Consider using a sliding window approach",
+    "Use a hash set to track characters in current window",
+    "When you find a duplicate, how should you adjust your window?"
+  ],
+  "topics": ["Hash Table", "String", "Sliding Window"],
+  "time_limit_seconds": 1200
+}
