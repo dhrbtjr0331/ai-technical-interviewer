@@ -5,3 +5,4 @@ __pycache__/
 .coverage
 *.pyc
 .DS_Store
+IMPLEMENTATION_SUMMARY.md

@@ -1,0 +1,117 @@
+type Interview {
+  id: ID!
+  sessionId: String!
+  userId: String!
+  difficulty: String!
+  status: String!
+  startedAt: String!
+  endedAt: String
+  currentProblem: Problem
+  messages: [Message!]!
+}
+
+type Problem {
+  id: ID!
+  title: String!
+  description: String!
+  difficulty: String!
+  topics: [String!]!
+  starterCode: String
+  testCases: [TestCase!]!
+}
+
+type TestCase {
+  input: String!
+  expectedOutput: String!
+  description: String
+}
+
+type Message {
+  id: ID!
+  sessionId: String!
+  speaker: String!
+  content: String!
+  timestamp: String!
+  messageType: String!
+}
+
+type CodeSubmission {
+  sessionId: String!
+  code: String!
+  language: String!
+  timestamp: String!
+  analysis: CodeAnalysis
+}
+
+type CodeAnalysis {
+  feedback: String!
+  suggestions: [String!]!
+  quality: String!
+  timestamp: String!
+}
+
+type ExecutionResult {
+  sessionId: String!
+  output: String!
+  error: String
+  exitCode: Int!
+  executionTime: Float!
+  timestamp: String!
+}
+
+type Query {
+  # Get interview by session ID
+  interview(sessionId: String!): Interview
+
+  # Get all interviews for a user
+  interviews(userId: String!, limit: Int, offset: Int): [Interview!]!
+
+  # Get all messages for an interview session
+  messages(sessionId: String!, limit: Int, offset: Int): [Message!]!
+
+  # Get available problems by difficulty
+  problems(difficulty: String, limit: Int): [Problem!]!
+
+  # Get specific problem by ID
+  problem(id: ID!): Problem
+}
+
+type Mutation {
+  # Start a new interview
+  startInterview(userId: String!, difficulty: String!): Interview!
+
+  # Send a message in an interview
+  sendMessage(sessionId: String!, content: String!): Message!
+
+  # Submit code for analysis
+  submitCode(sessionId: String!, code: String!, language: String!): CodeSubmission!
+
+  # Execute code
+  executeCode(sessionId: String!): ExecutionResult!
+
+  # End an interview
+  endInterview(sessionId: String!): Interview!
+
+  # Delete an interview
+  deleteInterview(sessionId: String!): Boolean!
+}
+
+type Subscription {
+  # Subscribe to new messages in an interview
+  messageAdded(sessionId: String!): Message!
+
+  # Subscribe to interview status updates
+  interviewUpdated(sessionId: String!): Interview!
+
+  # Subscribe to code analysis results
+  codeAnalysisCompleted(sessionId: String!): CodeAnalysis!
+
+  # Subscribe to execution results
+  executionCompleted(sessionId: String!): ExecutionResult!
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}

@@ -3,47 +3,65 @@ import os
 import logging
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TypedDict, Annotated
 import uuid
 
-# CrewAI and LangChain imports
-from crewai import Agent, Task, Crew, Process
+# LangGraph and LangChain imports
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_anthropic import ChatAnthropic
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.schema import BaseMessage, HumanMessage, AIMessage
+from langchain.schema import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import AIMessage as CoreAIMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 # Database for problem management
 import asyncpg
 
 from shared.message_bus import MessageBus, Channels, get_message_bus
 from shared.models import (
-    AgentMessage, EventType, InterviewContext, InterviewState, 
+    AgentMessage, EventType, InterviewContext, InterviewState,
     Problem, Difficulty, Message, PerformanceMetrics
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# LangGraph State Schema
+class InterviewWorkflowState(TypedDict):
+    """State for the interview coordination workflow"""
+    session_id: str
+    user_id: str
+    current_action: str
+    user_input: Optional[str]
+    interview_state: str
+    current_problem: Optional[Dict[str, Any]]
+    routing_decision: Optional[str]
+    messages: List[BaseMessage]
+    context: Dict[str, Any]
+    next_step: Optional[str]
+
 class CoordinatorAgent:
     """
-    Master orchestrator using CrewAI for multi-agent coordination.
+    Master orchestrator using LangGraph for multi-agent coordination.
     Manages interview flow, routes messages, and controls state transitions.
     """
-    
+
     def __init__(self):
         self.agent_name = "coordinator"
         self.message_bus: MessageBus = None
         self.db_pool: asyncpg.Pool = None
         self.running = False
-        
+
         # LangChain components
         self.llm: ChatAnthropic = None
         self.memory: ConversationBufferWindowMemory = None
-        
-        # CrewAI components
-        self.crew_agent: Agent = None
-        self.crew: Crew = None
-        
+
+        # LangGraph components
+        self.workflow: StateGraph = None
+        self.compiled_graph = None
+        self.checkpointer = MemorySaver()
+
         # Active sessions
         self.active_sessions: Dict[str, InterviewContext] = {}
         
@@ -53,10 +71,10 @@ class CoordinatorAgent:
             await self._setup_llm_and_memory()
             await self._setup_database()
             await self._setup_message_bus()
-            await self._setup_crewai()
-            
+            await self._setup_langgraph()
+
             logger.info("✅ Coordinator Agent initialized successfully")
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize coordinator: {e}")
             raise
@@ -118,44 +136,133 @@ class CoordinatorAgent:
         
         logger.info("✅ Message bus subscriptions established")
     
-    async def _setup_crewai(self):
-        """Setup CrewAI agent and crew"""
-        
-        # Define tools for the coordinator agent - using empty list for now but tools are available as methods
-        tools = []
-        
-        # Create the coordinator CrewAI agent
-        self.crew_agent = Agent(
-            role="Technical Interview Coordinator",
-            goal="Orchestrate smooth, effective technical interviews that assess coding skills while maintaining a positive candidate experience",
-            backstory="""You are an experienced senior engineering manager who has conducted 
-            hundreds of technical interviews at top tech companies. You understand how to:
-            
-            - Select appropriate problems based on candidate level
-            - Manage interview pacing and flow
-            - Route questions to specialized agents (interviewer, code analyzer, hint provider)
-            - Recognize when candidates need encouragement vs. challenge
-            - Maintain professional but friendly interview atmosphere
-            - Make real-time decisions about interview direction
-            
-            You coordinate between multiple specialized agents to create a cohesive interview experience.""",
-            verbose=True,
-            allow_delegation=True,  # Can delegate to other agents
-            llm=self.llm,
-            memory=True,
-            tools=tools  # Explicitly pass empty tools list
+    async def _setup_langgraph(self):
+        """Setup LangGraph workflow for interview coordination"""
+
+        # Define the state graph
+        workflow = StateGraph(InterviewWorkflowState)
+
+        # Add nodes (functions that process state)
+        workflow.add_node("analyze_input", self._analyze_input_node)
+        workflow.add_node("route_decision", self._route_decision_node)
+        workflow.add_node("select_problem", self._select_problem_node)
+        workflow.add_node("handle_user_message", self._handle_user_message_node)
+        workflow.add_node("process_code_submission", self._process_code_submission_node)
+        workflow.add_node("process_execution", self._process_execution_node)
+
+        # Set entry point
+        workflow.set_entry_point("analyze_input")
+
+        # Add conditional edges based on state
+        workflow.add_conditional_edges(
+            "analyze_input",
+            self._route_based_on_action,
+            {
+                "start_interview": "select_problem",
+                "user_message": "handle_user_message",
+                "code_submission": "process_code_submission",
+                "execute_code": "process_execution",
+                "end": END
+            }
         )
-        
-        # Create the crew with just the coordinator for now
-        # (We'll add other agents as we build them)
-        self.crew = Crew(
-            agents=[self.crew_agent],
-            verbose=True,
-            process=Process.sequential
-        )
-        
-        logger.info("✅ CrewAI agent and crew initialized")
-    
+
+        # Connect remaining nodes to route_decision
+        workflow.add_edge("select_problem", "route_decision")
+        workflow.add_edge("handle_user_message", "route_decision")
+        workflow.add_edge("process_code_submission", "route_decision")
+        workflow.add_edge("process_execution", "route_decision")
+        workflow.add_edge("route_decision", END)
+
+        # Compile the graph with checkpointer for state persistence
+        self.workflow = workflow
+        self.compiled_graph = workflow.compile(checkpointer=self.checkpointer)
+
+        logger.info("✅ LangGraph workflow initialized")
+
+    # LangGraph Node Functions
+    def _analyze_input_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Analyze input and prepare for routing"""
+        logger.info(f"🔍 Analyzing input: action={state.get('current_action')}")
+
+        # Add system message about coordinator role
+        system_msg = SystemMessage(content="""You are an experienced technical interview coordinator.
+Your role is to orchestrate the interview flow, select appropriate problems, and route messages to specialized agents.""")
+
+        if "messages" not in state or not state["messages"]:
+            state["messages"] = [system_msg]
+        elif not any(isinstance(msg, SystemMessage) for msg in state["messages"]):
+            state["messages"].insert(0, system_msg)
+
+        return state
+
+    def _route_based_on_action(self, state: InterviewWorkflowState) -> str:
+        """Conditional routing based on current action"""
+        action = state.get("current_action", "")
+        logger.info(f"🔀 Routing based on action: {action}")
+
+        if action == "start_interview":
+            return "start_interview"
+        elif action == "user_message":
+            return "user_message"
+        elif action == "submit_code":
+            return "code_submission"
+        elif action == "execute_code":
+            return "execute_code"
+        else:
+            return "end"
+
+    def _select_problem_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Select appropriate problem for the interview"""
+        logger.info("🎯 Selecting problem...")
+
+        # This would normally be async, but nodes need to be sync
+        # We'll handle async operations through the message handler
+        state["next_step"] = "problem_selected"
+        state["routing_decision"] = "interviewer"
+        return state
+
+    def _handle_user_message_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Handle user message and determine routing"""
+        user_input = state.get("user_input", "")
+        logger.info(f"💬 Processing user message: {user_input[:50]}...")
+
+        # Use LLM to determine routing
+        messages = state.get("messages", [])
+        messages.append(HumanMessage(content=f"User says: {user_input}\nWhich agent should handle this? (interviewer/code_analyzer/hint_provider)"))
+
+        # Simple keyword-based routing for now
+        user_input_lower = user_input.lower()
+        if any(word in user_input_lower for word in ["hint", "help", "stuck"]):
+            state["routing_decision"] = "hint_provider"
+        elif any(word in user_input_lower for word in ["code", "solution"]):
+            state["routing_decision"] = "code_analyzer"
+        else:
+            state["routing_decision"] = "interviewer"
+
+        state["messages"] = messages
+        return state
+
+    def _process_code_submission_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Process code submission"""
+        logger.info("📝 Processing code submission...")
+        state["routing_decision"] = "code_analyzer"
+        state["next_step"] = "code_analysis"
+        return state
+
+    def _process_execution_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Process code execution request"""
+        logger.info("⚡ Processing execution request...")
+        state["routing_decision"] = "execution"
+        state["next_step"] = "execute"
+        return state
+
+    def _route_decision_node(self, state: InterviewWorkflowState) -> InterviewWorkflowState:
+        """Final routing decision and message publication"""
+        routing = state.get("routing_decision", "interviewer")
+        logger.info(f"✅ Routing to: {routing}")
+        state["next_step"] = "complete"
+        return state
+
     # Helper methods for coordination logic
     def select_problem_tool(self, difficulty: str = "medium") -> str:
         """Tool: Select appropriate problem"""
@@ -294,9 +401,9 @@ class CoordinatorAgent:
             # Update conversation history
             context.add_conversation("user", user_content)
             await self.message_bus.store_context(session_id, context)
-            
-            # Use CrewAI to decide how to handle this input
-            await self._process_user_input_with_crew(session_id, user_content, context)
+
+            # Use LangGraph to decide how to handle this input
+            await self._process_user_input_with_langgraph(session_id, user_content, context)
             
         except Exception as e:
             logger.error(f"❌ Error handling user interaction: {e}")
@@ -360,27 +467,25 @@ class CoordinatorAgent:
             # Store context
             self.active_sessions[session_id] = context
             await self.message_bus.store_context(session_id, context)
-            
-            # Use CrewAI to select appropriate problem and start interview
-            task = Task(
-                description=f"""
-                Start a new technical interview for user {user_id} with difficulty {difficulty}.
-                
-                Steps:
-                1. Select an appropriate coding problem for {difficulty} level
-                2. Prepare a welcoming introduction
-                3. Present the problem clearly
-                4. Set up the interview context
-                
-                Make this feel like a real technical interview - professional but encouraging.
-                """,
-                agent=self.crew_agent,
-                expected_output="Interview start response with problem introduction"
+
+            # Use LangGraph workflow to select appropriate problem and start interview
+            initial_state = InterviewWorkflowState(
+                session_id=session_id,
+                user_id=user_id,
+                current_action="start_interview",
+                user_input=None,
+                interview_state=InterviewState.PROBLEM_INTRODUCTION.value,
+                current_problem=None,
+                routing_decision=None,
+                messages=[],
+                context={"difficulty": difficulty},
+                next_step=None
             )
-            
-            # Skip CrewAI for now and handle directly
-            crew_result = "Interview started successfully"
-            
+
+            # Execute workflow
+            config = {"configurable": {"thread_id": session_id}}
+            result_state = self.compiled_graph.invoke(initial_state, config)
+
             # Select and load the problem
             problem = await self._select_problem(difficulty)
             if problem:
@@ -401,46 +506,38 @@ class CoordinatorAgent:
         except Exception as e:
             logger.error(f"❌ Error starting interview: {e}")
     
-    async def _process_user_input_with_crew(self, session_id: str, user_input: str, context: InterviewContext):
-        """Process user input using CrewAI orchestration"""
+    async def _process_user_input_with_langgraph(self, session_id: str, user_input: str, context: InterviewContext):
+        """Process user input using LangGraph workflow"""
         try:
-            # Create task for CrewAI to analyze and route the input
-            task = Task(
-                description=f"""
-                Analyze this user input and decide how to handle it:
-                
-                User Input: "{user_input}"
-                Current Interview State: {context.interview_state.value}
-                Current Problem: {context.current_problem.title if context.current_problem else "None"}
-                
-                Based on the input and context:
-                1. Determine which agent should handle this (interviewer, code_analyzer, hint_provider, etc.)
-                2. Decide if the interview state should change
-                3. Provide routing decision and any context updates needed
-                
-                Return a JSON with:
-                - target_agent: which agent to route to
-                - action: what action they should take
-                - context_updates: any state changes needed
-                - priority: high/medium/low
-                """,
-                agent=self.crew_agent,
-                expected_output="JSON routing decision"
+            # Create initial state for the workflow
+            initial_state = InterviewWorkflowState(
+                session_id=session_id,
+                user_id=context.user_id,
+                current_action="user_message",
+                user_input=user_input,
+                interview_state=context.interview_state.value,
+                current_problem=context.current_problem.to_dict() if context.current_problem else None,
+                routing_decision=None,
+                messages=[],
+                context={},
+                next_step=None
             )
-            
-            # Smart routing based on user input content
-            result = await self._smart_route_user_input(user_input, context)
-            
-            # Parse and execute the routing decision
-            await self._execute_routing_decision(session_id, user_input, result, context)
-            
+
+            # Execute the workflow
+            config = {"configurable": {"thread_id": session_id}}
+            result_state = self.compiled_graph.invoke(initial_state, config)
+
+            # Execute the routing decision
+            routing_decision = result_state.get("routing_decision", "interviewer")
+            await self._execute_routing_decision(session_id, user_input, f"route_to:{routing_decision}", context)
+
         except Exception as e:
-            logger.error(f"❌ Error processing user input with crew: {e}")
+            logger.error(f"❌ Error processing user input with LangGraph: {e}")
             # Fallback to simple routing
             await self._route_to_interviewer(session_id, "handle_user_input", {"content": user_input})
     
     async def _execute_routing_decision(self, session_id: str, user_input: str, decision: str, context: InterviewContext):
-        """Execute the routing decision made by CrewAI"""
+        """Execute the routing decision made by LangGraph"""
         try:
             # For now, simple parsing - we'll improve this
             if "interviewer" in decision.lower():
